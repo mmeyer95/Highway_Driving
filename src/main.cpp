@@ -1,12 +1,15 @@
 #include <uWS/uWS.h>
 #include <fstream>
 #include <iostream>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
 #include "helpers.h"
 #include "json.hpp"
+#include "spline.h"
 
 // for convenience
 using nlohmann::json;
@@ -92,13 +95,58 @@ int main() {
 
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-
-          /**
-           * TODO: define a path made up of (x,y) points that the car will visit
-           *   sequentially every .02 seconds
-           */
-
-
+		  //initialize for a straight-ahead move
+          //float max_S_change = 0.4;
+          if (end_path_s!=0 && end_path_d!=0){
+            double d = end_path_d;
+            double s = end_path_s;
+          }
+          else {
+            double d = car_d;
+          	double s = car_s;
+          }
+          vector<double> spline_x;
+          vector<double> spline_y;
+          vector<double> spline_time;
+          //point at the end of last move
+          vector<double> XY = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          spline_x.push_back(XY[0]);
+          spline_y.push_back(XY[1]);
+          spline_time.push_back(0);
+          //point 1 down the road
+          s = s+1;
+          XY = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          spline_x.push_back(XY[0]);
+          spline_y.push_back(XY[1]);
+          spline_time.push_back(0.5);
+          //point 2 down the road
+          s = s+1;
+          XY = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          spline_x.push_back(XY[0]);
+          spline_y.push_back(XY[1]);
+          spline_time.push_back(1);
+          //find next points in s & d for straight-away, convert to x*y, add to spline arrays
+          //for (int i=0; i<10; i++){
+          //s = s + max_S_change;
+          //vector<double> XY = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          //std::cout << "s=" << s <<std::endl;
+          //std::cout << "d=" << d <<std::endl;
+          //std::cout << "X=" << XY[0] <<std::endl;
+          //std::cout << "Y=" << XY[1] <<std::endl;
+          //spline_x.push_back(XY[0]);
+          //spline_y.push_back(XY[1]);
+          //}
+          //compute the spline and fill next x & y based on calculated positions at 0.2 s intervals
+          tk::spline s_x;
+          s_x.set_points(spline_time,spline_x);
+          tk::spline s_y;
+          s_y.set_points(spline_time, spline_y);
+          for (int i=1; i<11; i++){
+            next_x_vals.push_back(s_x(0.2*i));
+            //std::cout << "next_x: " << s_x(0.2*i) << std::endl;
+            next_y_vals.push_back(s_y(0.2*i));
+            //std::cout << "next_y: " << s_y(0.2*i) << std::endl;
+          }
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
