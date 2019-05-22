@@ -19,7 +19,7 @@ using std::vector;
 double max_accel = 10; //  m/s^2         
 double max_speed = 22.352; //maximum speed in m/s (50 MPH)
 double desired_min = 17.8; //~40 mph
-double speed_diff = max_accel*0.02*5;
+double speed_diff = max_accel*0.02;
 
 double set_speed(double current_speed, double compare_speed) {
   //set speed: add, subtract, or stay the same
@@ -30,7 +30,7 @@ double set_speed(double current_speed, double compare_speed) {
   else {speed = current_speed;}
   //do not go above 50 or too far below 40  
   if (speed>max_speed){speed=max_speed;}
-  if (speed<desired_min){speed = desired_min;}
+  //if (speed<desired_min){speed = desired_min;}
   //std::cout << "Current speed = " << current_speed << ". Target speed: " << speed << std::endl;
   return speed;
 }
@@ -112,6 +112,7 @@ int main() {
 
           json msgJson;
   
+
 //-----------------------------------------------------------------------------------------------------------------------          
           /////**BEHAVIOR PLANNING**/////
           //set up one-time defined variables
@@ -119,8 +120,9 @@ int main() {
   		  int target_lane; //the lane the car should aim to be in
 		  double target_speed = max_speed;
           double current_speed = car_speed*0.447; //in m/s
+          double time_step = 0.02; //seconds time step
           double turn_flag = 0; //keep track of whether a lane change is happening
-          vector<int> behaviors = {}; //keep track of prior moves
+          vector<int> behaviors = {0}; //keep track of prior moves
           vector<double> lane_mults = {2,6,10}; //multipliers of d vector to be in the center of lanes 0, 1, 2 resp.
           
           //Figure out what lane the car is in based on the current d value
@@ -184,13 +186,15 @@ int main() {
               }
             }
           }
-          
 
 //-----------------------------------------------------------
 		  //Based on car proximities, pick a move
-          bool move_flag = 0; //flag set tp high if changing lanes, used for velocity calc later
-		  bool left_move = current_lane>0 && (!car_left || left_velocity < ahead_velocity) && behaviors.back!=1; //left move possible if conditions met
-          bool right_move = current_lane<2 && (!car_right || right_velocity < ahead_velocity) && behaviors.back!=-1; //right move possible if conditions met
+          int move_flag = 0; //flag set to high if changing lanes, used for velocity calc later
+          //std::cout << "Dustin <333" << std::endl;
+          //std::cout << behaviors.back() << std::endl;
+		  bool left_move = current_lane>0 && (!car_left || left_velocity < ahead_velocity) && behaviors.back()!=1; //left move possible if conditions met
+          bool right_move = current_lane<2 && (!car_right || right_velocity < ahead_velocity) && behaviors.back()!=-1; //right move possible if conditions met
+          //std::cout << "Bools" << std::endl;
           
           //if car ahead, but right move is possible
           if (car_ahead && right_move){
@@ -212,6 +216,7 @@ int main() {
             target_speed = set_speed(target_speed, ahead_velocity);
             behaviors.push_back(0);
           }
+          std::cout << "Trajectory." << std::endl;
   //****************************************************//
           //////**TRAJECTORY GENERATION**/////
           
@@ -222,6 +227,7 @@ int main() {
           //Collect values for spline
           vector<double> spline_x = {};
           vector<double> spline_y = {};
+          vector<double> spline_time = {};
           
           //Add un-processed points to path to send to simulator
           if (prev_len>0){
@@ -243,6 +249,9 @@ int main() {
 
     		spline_y.push_back(prev_car_y);
     		spline_y.push_back(car_y);
+            
+            spline_time.push_back(-1*time_step);
+            spline_time.push_back(0);
 		  }
           
 		  else { 
@@ -251,21 +260,43 @@ int main() {
               spline_x.push_back(previous_path_x[prev_len-1]);
           	  spline_y.push_back(previous_path_y[prev_len-2]);
               spline_y.push_back(previous_path_y[prev_len-1]);
+              spline_time.push_back(-1*time_step);
+              spline_time.push_back(0);
           }
+
 
           
           //Use points down the road to calculate spline
+          double safety;
+          if (turn_flag) {safety=1.2;}
+          else if (abs(car_yaw)>=45) {safety=1.2;}
+          else {safety=1.15;}
+          
           double s;
           if (prev_len>0) { s = end_path_s;}
           else { s = car_s;}
-          //std::cout << "End path s: " << end_path_s << std::endl;
-          vector<double> wp1 = getXY(s + 30, lane_mults[target_lane], map_waypoints_s, map_waypoints_x, map_waypoints_y);
+		  
+          for (int i=1; i<4; i++){
+            vector<double> wp = getXY(s + 30*i, lane_mults[target_lane], map_waypoints_s, map_waypoints_x, map_waypoints_y);
+            double dist_to = distance (wp[0], wp[1], spline_x.back(), spline_y.back());
+            double time_point;
+            if (target_speed<1){time_point = spline_time.back() + safety*dist_to/1;}
+            else {
+            	time_point = spline_time.back() + safety*dist_to/target_speed;
+            }
+            spline_time.push_back(time_point);
+            spline_x.push_back(wp[0]);
+            spline_y.push_back(wp[1]);  
+          }
+          
+          for (int i=0; i< spline_time.size();i++){
+            std::cout << "Spline: " << spline_time[i] <<"."<< spline_x[i] << "." << spline_y[i] << std::endl;
+          }
+          
+          /*vector<double> wp1 = getXY(s + 30, lane_mults[target_lane], map_waypoints_s, map_waypoints_x, map_waypoints_y);
           vector<double> wp2 = getXY(s + 60, lane_mults[target_lane], map_waypoints_s, map_waypoints_x, map_waypoints_y);
           vector<double> wp3 = getXY(s + 90, lane_mults[target_lane], map_waypoints_s, map_waypoints_x, map_waypoints_y);
 			
-          if (wp1[0]<spline_x.back()){wp1[0]=spline_x.back();} //avoid the spline error
-          //if (wp2[0]<wp1[0]){wp2[0]=wp1[0];}
-          //if (wp3[0]<wp2[0]){wp3[0]=wp2[0];}
           spline_x.push_back(wp1[0]);
           spline_x.push_back(wp2[0]);
           spline_x.push_back(wp3[0]);
@@ -273,25 +304,29 @@ int main() {
           spline_y.push_back(wp2[1]);
           spline_y.push_back(wp3[1]);
 
-     
-          for (int k=0; k<spline_x.size(); k++){
-            std::cout << "Spline: " << spline_x[k] << ". " << spline_y[k] << std::endl;
-          }
+     */
+          //for (int k=0; k<spline_x.size(); k++){
+            //std::cout << "Spline: " << spline_x[k] << ". " << spline_y[k] << std::endl;
+          //}
 
           //Compute the spline and fill next x & y based on calculated positions at 0.02 s intervals
-          tk::spline path;
-          path.set_points(spline_x,spline_y);
+          //tk::spline path;
+          //path.set_points(spline_x,spline_y);
+          tk::spline path_x;
+          tk::spline path_y;
+          path_x.set_points(spline_time,spline_x);
+          path_y.set_points(spline_time,spline_y);
           
           //Get 1 second of path data, including any un-processed points from last trajectory
           
           //Factor of safety for speed since distance calc is based on shorest path
-          double safety;
+          /*double safety;
           if (turn_flag) {safety=1.2;}
           else if (abs(car_yaw)>=45) {safety=1.2;}
           else {safety=1.15;}
-          
+          */
 		  //find delta x for values to be pushed back
-          double time_step = 0.02; //seconds time step
+		  /*
 		  double dist_step = target_speed*time_step/safety; //max change in distance allowed between each point
           double last_x; //last x position of car as calculated- either end of last traj, or current pos.
           if (prev_len !=0){
@@ -307,6 +342,11 @@ int main() {
 			last_x += x_step;
             next_x_vals.push_back(last_x);
             next_y_vals.push_back(path(last_x));
+          }*/
+          
+          for (int i=1; i<51-prev_len; i++){
+            next_x_vals.push_back(path_x(i*0.02));
+            next_y_vals.push_back(path_y(i*0.02));
           }
 //--------------------------------------------------------------------------------------------------------------------------          
           msgJson["next_x"] = next_x_vals;
