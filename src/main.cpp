@@ -29,7 +29,7 @@ vector<double> ref_dists = {100, 100, 100};		//keep track of distance of each la
 double set_speed(double current_speed, double compare_speed, int prev_len) {
   //set speed: add, subtract, or stay the same
   double speed;
-  double speed_diff_factor = 3;
+  double speed_diff_factor = 40;
   //std::cout << "prev length: " << prev_len << std::endl;
   if (prev_len>25){speed_diff_factor=50-prev_len;}
   if (compare_speed > current_speed) {
