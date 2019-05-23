@@ -16,21 +16,25 @@ using nlohmann::json;
 using std::string;
 using std::vector;
 
+//Initialize variables once
 double max_accel = 10; //  m/s^2         
 double max_speed = 22.352; //maximum speed in m/s (50 MPH)
 double desired_min = 17.8; //~40 mph
 double speed_diff = max_accel*0.02;
-double target_speed = 0;
-int cycles =0;
+double target_speed = 0; //initialize target speed to 0
+double time_step = 0.02; //seconds time step
 
+//Initialize vectors once
 vector<double> ref_vels = {max_speed, max_speed, max_speed};	//keep track of velocities of travel of each lane
 vector<double> ref_dists = {100, 100, 100};		//keep track of distance of each lane
+vector<double> lane_mults = {2,6,10}; //multipliers of d vector to be in the center of lanes 0, 1, 2 resp.
+vector<int> behaviors = {0}; //keep track of prior moves
 
+//Define function set_speed
 double set_speed(double current_speed, double compare_speed, int prev_len) {
   //set speed: add, subtract, or stay the same
   double speed;
   double speed_diff_factor = 40;
-  //std::cout << "prev length: " << prev_len << std::endl;
   if (prev_len>25){speed_diff_factor=50-prev_len;}
   if (compare_speed > current_speed) {
     speed = current_speed + speed_diff*speed_diff_factor;}
@@ -38,7 +42,6 @@ double set_speed(double current_speed, double compare_speed, int prev_len) {
   else {speed = current_speed;}
   //do not go above 50  
   if (speed>max_speed){speed=max_speed;}
-   //std::cout << "Compare speed: " << compare_speed << ". Current speed: " << current_speed << "Target: " << speed << std::endl;
   return speed;
 }
 
@@ -122,16 +125,11 @@ int main() {
 
 //------------------------------------------------------------------------------------------------------------------   
           /////**BEHAVIOR PLANNING**/////
-          //set up one-time defined variables
-          cycles+=1;
+          //set up variables for this cycle
   		  int current_lane;	//the lane the car is currently in (0, 1, or 2)
   		  int target_lane; //the lane the car should aim to be in
-		  //double target_speed = max_speed;
           double current_speed = car_speed*0.447; //in m/s
-          double time_step = 0.02; //seconds time step
           double turn_flag = 0; //keep track of whether a lane change is happening
-          vector<int> behaviors = {0}; //keep track of prior moves
-          vector<double> lane_mults = {2,6,10}; //multipliers of d vector to be in the center of lanes 0, 1, 2 resp.
           
           //Figure out what lane the car is in based on the current d value
 		  if (car_d>=0 && car_d<4){current_lane=0;}
@@ -163,7 +161,7 @@ int main() {
 
 			//Is there a car in the same lane
             if (other_lane==current_lane && car_ahead==false){
-              car_ahead = car_distance>0 && car_distance<40;
+              car_ahead = car_distance>0 && car_distance<30;
               if (car_ahead==true){
                 ref_vels[current_lane] = other_velocity;
                 ref_dists[current_lane] = car_distance;
@@ -172,7 +170,7 @@ int main() {
             
             //Is there a car in the left lane to me
             else if (other_lane==current_lane-1 && car_left==false){
-              car_left = car_distance>-8 && car_distance<40;
+              car_left = car_distance>-8 && car_distance<30;
               double min_d_left = 20000;
               if (car_left==true && car_distance<min_d_left){
                 ref_vels[current_lane-1] = other_velocity;
@@ -182,7 +180,7 @@ int main() {
             }
             //Is there a car in the right lane to me
             else if (other_lane==current_lane+1 && car_right==false){
-              car_right = car_distance>-8 && (car_distance)<40;
+              car_right = car_distance>-8 && (car_distance)<30;
               double min_d_right = 20000;
               if (car_right==true && car_distance<min_d_right) {
                 min_d_right = car_distance;
@@ -192,15 +190,15 @@ int main() {
             }
           }
           
+          //Update reference velocities vector based on sensor fusion data
           if(!car_ahead){ref_vels[current_lane]=max_speed;}
           if(!car_left && current_lane>0){ref_vels[current_lane-1]=max_speed;}
           if(!car_right && current_lane<2){ref_vels[current_lane+1]=max_speed;}
 
-//-----------------------------------------------------------
+//-------------------------------------------------------------------
 		  //Based on car proximities, pick a move
-		  bool left_move = current_lane>0 && (!car_left || (ref_vels[current_lane-1] > ref_vels[current_lane] && ref_dists[current_lane-1]>20)) && behaviors.back()!=1; //left move possible if conditions met
-          bool right_move = current_lane<2 && (!car_right || (ref_vels[current_lane+1] > ref_vels[current_lane] && ref_dists[current_lane+1]>20)) && behaviors.back()!=-1; //right move possible if conditions met
-          //std::cout << "Bools" << std::endl;
+		  bool left_move = current_lane>0 && (!car_left || ((ref_vels[current_lane-1] > ref_vels[current_lane]+4) && ref_dists[current_lane-1]>20)) && behaviors.back()!=1; //left move possible if conditions met
+          bool right_move = current_lane<2 && (!car_right || ((ref_vels[current_lane+1] > ref_vels[current_lane]+4) && ref_dists[current_lane+1]>20)) && behaviors.back()!=-1; //right move possible if conditions met
           
           //If I'm in the middle lane with a car ahead and I can move either left or right, pick the move either without a car ahead(priority), or the one moving faster (secondary)
           if (car_ahead && left_move && right_move){
@@ -213,20 +211,19 @@ int main() {
             else if (ref_vels[current_lane-1]<ref_vels[current_lane+1]){left_move=0;}
           }
           
-  		  //If there is a car ahead and I can move left, do that
-          ///if there is no car on either side, making a left lane change takes priority (passing on the left)
-          if (car_ahead && left_move){
-            target_lane = current_lane -1;
-            target_speed = set_speed(target_speed, ref_vels[target_lane], prev_len);
-            turn_flag = 1;
-            behaviors.push_back(-1);
-          }
-          //Move right if a car is ahead and I can do so
-          else if (car_ahead && right_move){
+  		  //If there is a car ahead and I can move right, do that
+          if (car_ahead && right_move){
             target_lane = current_lane + 1;
             target_speed = set_speed(target_speed, ref_vels[target_lane], prev_len);
             turn_flag = 1;
             behaviors.push_back(1);
+          }
+          //Move left if a car is ahead and I can do so
+          else if (car_ahead && left_move){
+            target_lane = current_lane -1;
+            target_speed = set_speed(target_speed, ref_vels[target_lane], prev_len);
+            turn_flag = 1;
+            behaviors.push_back(-1);
           }
           //If movement isn't possible, or no car is ahead, set speed based on either speed limit or car ahead
           else {
@@ -256,8 +253,7 @@ int main() {
           }   
           
           //Use previous points for smoothness in spline calc
-          ////end of last path = time 0
-          //When the length is <2, this is **probably** the first sample
+          /////When the length is <2, this is **probably** the first sample
           if (prev_len<2) {
 			vector<double> previous = getXY(car_s - 30, car_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
             
@@ -285,15 +281,13 @@ int main() {
           //Determine velocity safety factor based on movement
           double safety;
           if (turn_flag) {safety=1.2;}
-          else {safety=1.1;}
+          else {safety=1.1;} //about 45 MPH
           
           //Find s to base future waypoints on
           double s;
           if (prev_len>0) {s = end_path_s;}
           else {s = car_s;}
 
-          //std::cout << "Target speed: " << target_speed << ". Target lane: " << target_lane << ".Ref vel: " << ref_vels[target_lane] << std::endl;
-          //std::cout << "Target lane: " << target_lane << std::endl;
           //Find XY values of points down the road, calculate time, and fill spline vectors
           for (int i=1; i<4; i++){
             vector<double> wp = getXY(s + 30*i, lane_mults[target_lane], map_waypoints_s, map_waypoints_x, map_waypoints_y);
@@ -305,12 +299,6 @@ int main() {
             spline_x.push_back(wp[0]);
             spline_y.push_back(wp[1]);  
           }
-         if (cycles<5){
-         std::cout << "---" << std::endl;
-         for (int i=0; i< spline_time.size();i++){
-            std::cout << "Spline: " << spline_time[i] <<", "<< spline_x[i] << ", " << spline_y[i] << std::endl;
-          }
-         }
           
           //Compute the splines for x & y
           tk::spline path_x;
@@ -322,8 +310,6 @@ int main() {
           for (int i=1; i<51-prev_len; i++){
             double next_x = path_x(i*0.02);
             double next_y = path_y(i*0.02);
-            if (cycles<5){
-            std::cout << "X: " << next_x << ", Y: " << next_y << std::endl;}
             next_x_vals.push_back(next_x);
             next_y_vals.push_back(next_y);
           }
